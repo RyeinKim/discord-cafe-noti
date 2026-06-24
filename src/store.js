@@ -71,9 +71,10 @@ export function getActiveSession(channelId) {
 }
 
 /** 채널에 새 세션 생성 + 활성 등록. 채널 메뉴를 세션에 스냅샷한다. */
-/** "2026-06-24","11:20" → 그 날 KST 시각의 ISO 문자열. */
+/** "2026-06-24","11:20"/"9:30" → 그 날 KST 시각의 ISO 문자열(시·분 2자리 정규화). */
 function atKST(dateStr, hm) {
-  return new Date(`${dateStr}T${hm}:00+09:00`).toISOString();
+  const [h, m = '00'] = String(hm).split(':');
+  return new Date(`${dateStr}T${h.padStart(2, '0')}:${m.padStart(2, '0')}:00+09:00`).toISOString();
 }
 
 /**

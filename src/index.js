@@ -556,7 +556,7 @@ client.once(Events.ClientReady, async (c) => {
   } catch (e) {
     log.error('부팅 복구 오류', e);
   }
-  rebuildScheduler({ onOpen, onClose });
+  rebuildScheduler({ onOpen, onCloseCheck });
 });
 
 process.on('unhandledRejection', (reason) => {
