@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { config } from './config.js';
 import { readJSON, writeJSON } from './util.js';
+import { log } from './logger.js';
 
 /**
  * 명령 사용 허용 화이트리스트(data/access.json).
@@ -70,6 +71,7 @@ export function removeUser(id) {
 export function syncAccess(client) {
   const existed = existsSync(ACCESS_FILE);
   const a = loadAccess();
+  const dropped = [];
 
   const resolve = (nameOrId) => {
     if (isSnowflake(nameOrId)) return nameOrId; // 이미 ID
@@ -77,7 +79,8 @@ export function syncAccess(client) {
       const role = g.roles.cache.find((r) => r.name === nameOrId);
       if (role) return role.id;
     }
-    return null; // 못 찾음 → 드롭
+    dropped.push(nameOrId); // 못 찾음 → 드롭(추적)
+    return null;
   };
 
   const roles = a.roles.map(resolve).filter(Boolean);
@@ -87,5 +90,6 @@ export function syncAccess(client) {
   }
   a.roles = [...new Set(roles)];
   save(a);
+  if (dropped.length) log.warn('역할 화이트리스트 이름→ID 변환 실패(드롭됨)', { dropped });
   return a;
 }

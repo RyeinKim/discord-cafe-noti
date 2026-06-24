@@ -447,6 +447,9 @@ async function handleCafeCommand(interaction) {
     }
     if (group === 'role' && sub === 'add') {
       const role = interaction.options.getRole('role');
+      if (role.id === interaction.guildId) {
+        return interaction.editReply('⚠️ `@everyone`은 추가할 수 없어요(전체 개방 방지).');
+      }
       return interaction.editReply(addRole(role.id) ? `✅ 허용 역할 추가: ${role}` : `ℹ️ 이미 허용된 역할이에요: ${role}`);
     }
     if (group === 'role' && sub === 'remove') {
