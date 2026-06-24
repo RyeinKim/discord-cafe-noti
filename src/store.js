@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import { config } from './config.js';
-import { getMenu } from './channels.js';
+import { getMenu, getTrigger } from './channels.js';
 import { readJSON, writeJSON } from './util.js';
 
 /**
@@ -74,6 +74,7 @@ export function getActiveSession(channelId) {
 export function createSession(channelId) {
   const date = todayKST();
   const id = `${channelId}-${date}_${kstClock()}`;
+  const tr = getTrigger(channelId);
   const session = {
     id,
     channelId,
@@ -83,6 +84,7 @@ export function createSession(channelId) {
     finalized: false,
     boardMessageId: null,
     threadId: null,
+    closeHM: tr ? tr.closeHM : null, // 마감 시각 스냅샷(트리거 없는 수동이면 null)
     menu: getMenu(channelId).map((m) => ({ emoji: m.emoji, label: m.label })), // 스냅샷
     orders: {},
     log: [],

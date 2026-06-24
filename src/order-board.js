@@ -7,10 +7,17 @@ import { config } from './config.js';
  */
 export function buildBoard({ session, disabled = false }) {
   const menu = session.menu;
-  const embed = new EmbedBuilder()
-    .setTitle(config.title)
-    .setDescription(disabled ? '🔒 주문이 마감되었습니다.' : config.description)
-    .setColor(0xc8956d);
+
+  let description;
+  if (disabled) {
+    description = '🔒 주문이 마감되었습니다.';
+  } else if (session.closeHM) {
+    description = `${config.description}\n⏰ **마감 ${session.closeHM}**`;
+  } else {
+    description = `${config.description}\n⏰ 마감: 수동 종료 시`;
+  }
+
+  const embed = new EmbedBuilder().setTitle(config.title).setDescription(description).setColor(0xc8956d);
 
   const rows = [];
   let row = new ActionRowBuilder();

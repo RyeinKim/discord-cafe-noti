@@ -18,7 +18,8 @@ export const config = {
   ],
 
   title: '오늘의 커피 주문 ☕',
-  description: '아래 버튼으로 주문하세요. **11:30에 마감**됩니다.',
+  // 마감 시각은 세션의 트리거에 따라 buildBoard에서 동적으로 덧붙는다(여기엔 마감 문구 X).
+  description: '아래 버튼으로 주문하세요.',
 
   // 스케줄(KST). 1단계는 등록 채널 공통 시각. 2단계에서 채널별로.
   timezone: 'Asia/Seoul',
