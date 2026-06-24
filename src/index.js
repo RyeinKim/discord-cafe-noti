@@ -33,7 +33,7 @@ import {
   setMenu,
   getMenu,
 } from './channels.js';
-import { loadAccess, addRole, removeRole, getRoles, addUser, removeUser, getUsers } from './access.js';
+import { loadAccess, syncAccess, addRole, removeRole, getRoles, addUser, removeUser, getUsers } from './access.js';
 import { rebuildScheduler } from './scheduler.js';
 import { log } from './logger.js';
 
@@ -159,7 +159,7 @@ async function isAllowed(interaction) {
       return false;
     }
   }
-  return member.roles?.cache?.some((r) => roles.includes(r.name)) ?? false;
+  return roles.some((id) => member.roles?.cache?.has(id) ?? false);
 }
 
 async function getChannel(channelId) {
@@ -447,15 +447,15 @@ async function handleCafeCommand(interaction) {
     }
     if (group === 'role' && sub === 'add') {
       const role = interaction.options.getRole('role');
-      return interaction.editReply(addRole(role.name) ? `✅ 허용 역할 추가: ${role}` : `ℹ️ 이미 허용된 역할이에요: ${role}`);
+      return interaction.editReply(addRole(role.id) ? `✅ 허용 역할 추가: ${role}` : `ℹ️ 이미 허용된 역할이에요: ${role}`);
     }
     if (group === 'role' && sub === 'remove') {
       const role = interaction.options.getRole('role');
-      return interaction.editReply(removeRole(role.name) ? `✅ 허용 역할 제거: ${role}` : `ℹ️ 목록에 없던 역할이에요: ${role}`);
+      return interaction.editReply(removeRole(role.id) ? `✅ 허용 역할 제거: ${role}` : `ℹ️ 목록에 없던 역할이에요: ${role}`);
     }
     if (group === 'role' && sub === 'list') {
       const roles = getRoles();
-      return interaction.editReply(roles.length ? '🛡️ 허용 역할: ' + roles.map((r) => `\`${r}\``).join(', ') : '🛡️ 허용 역할 없음 (관리자만 사용 가능).');
+      return interaction.editReply(roles.length ? '🛡️ 허용 역할: ' + roles.map((id) => `<@&${id}>`).join(', ') : '🛡️ 허용 역할 없음 (관리자만 사용 가능).');
     }
     if (group === 'user' && sub === 'add') {
       const user = interaction.options.getUser('user');
@@ -532,6 +532,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
 client.once(Events.ClientReady, async (c) => {
   log.info('로그인 완료', { tag: c.user.tag, channels: getChannelIds().length });
+  syncAccess(c); // 역할 이름→ID 마이그레이션 + adminRoleName 시드(최초)
   await registerCommands(c);
   try {
     await recoverIfNeeded();
