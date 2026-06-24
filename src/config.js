@@ -3,9 +3,9 @@ import 'dotenv/config';
 export const config = {
   token: process.env.BOT_TOKEN,
 
-  // 봇이 운영하는 채널 목록(시드). .env의 CHANNEL_IDS(콤마구분) 또는 CHANNEL_ID(단일)로 덮어쓰기 가능.
-  // 2단계에서 디스코드 /cafe trigger + data/channels.json으로 채널별 동적 관리 예정.
-  channels: (process.env.CHANNEL_IDS || process.env.CHANNEL_ID || '1519006705168552058')
+  // 초기 시드 채널(선택). 보통 비워두고 디스코드 /cafe channel add 로 등록·관리한다.
+  // 실제 채널 관리는 data/channels.json(디스코드 명령). 여기 비어 있어도 봇은 정상 시작.
+  channels: (process.env.CHANNEL_IDS || process.env.CHANNEL_ID || '')
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean),
@@ -55,9 +55,7 @@ export const closeMinutes = config.close.hour * 60 + config.close.minute;
 if (!config.token) {
   throw new Error('BOT_TOKEN이 없습니다. .env 파일에 BOT_TOKEN=... 을 설정하세요 (.env.example 참고).');
 }
-if (!Array.isArray(config.channels) || config.channels.length < 1) {
-  throw new Error('channels는 1개 이상이어야 합니다(.env CHANNEL_ID 또는 CHANNEL_IDS 확인).');
-}
+// channels는 비어 있어도 된다(디스코드 /cafe channel add 로 등록).
 if (config.menu.length < 1 || config.menu.length > 25) {
   throw new Error(`menu는 1~25개여야 합니다(Discord 버튼 상한). 현재 ${config.menu.length}개.`);
 }
