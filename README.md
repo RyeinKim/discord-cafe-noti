@@ -32,19 +32,24 @@ docker compose logs -f
 docker compose down
 ```
 
-### B) 미리 빌드된 이미지로 실행 (GHCR — 빌드 불필요)
+### B) 프라이빗 레지스트리로 빌드·배포
 
-`main`에 push되면 GitHub Actions가 **멀티아치(amd64/arm64) 이미지를 자동 빌드**해 `ghcr.io/ryeinkim/discord-cafe-noti:latest`에 게시한다. 받아서 실행:
+로컬에서 멀티아치 이미지를 빌드해 본인 레지스트리에 push (`<레지스트리>`만 교체):
+```bash
+docker buildx build --platform linux/amd64,linux/arm64 \
+  -t <레지스트리>/discord-cafe-noti:latest --push .
+```
+
+배포 서버에서 받아 실행:
 ```bash
 cp .env.example .env             # BOT_TOKEN 채우기
 docker run -d --name discord-cafe-noti --restart unless-stopped \
   --env-file .env -e TZ=Asia/Seoul \
   -v "$(pwd)/data:/app/data" -v "$(pwd)/logs:/app/logs" \
-  ghcr.io/ryeinkim/discord-cafe-noti:latest
+  <레지스트리>/discord-cafe-noti:latest
 docker logs -f discord-cafe-noti
 ```
-> 패키지가 비공개면 먼저 `echo <GitHub PAT> | docker login ghcr.io -u <user> --password-stdin`.
-> GitHub 패키지 설정에서 **public**으로 바꾸면 인증 없이 `docker pull` 가능.
+> 레지스트리 인증이 필요하면 먼저 `docker login <레지스트리>`.
 
 ### C) Node 직접 / pm2 (Docker 안 쓸 때)
 ```bash
