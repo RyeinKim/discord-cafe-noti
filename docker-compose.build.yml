@@ -1,0 +1,14 @@
+# 로컬 개발용: 소스에서 빌드해 실행한다.
+#   docker compose -f docker-compose.build.yml up -d --build
+services:
+  bot:
+    build: .
+    image: discord-cafe-noti:local
+    container_name: discord-cafe-noti
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      TZ: Asia/Seoul
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs

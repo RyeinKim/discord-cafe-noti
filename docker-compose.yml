@@ -1,12 +1,16 @@
+# 배포용: 프라이빗 레지스트리 이미지를 받아 실행한다.
+# 서버에 이 파일과 .env 만 두면 됨 (소스 clone 불필요):
+#   cp .env.example .env     # BOT_TOKEN / CHANNEL_IDS 채우기
+#   docker compose up -d
 services:
   bot:
-    build: .
-    image: discord-cafe-noti:latest
+    image: portainer.startupcode.kr/discord-cafe-noti:latest
     container_name: discord-cafe-noti
-    restart: unless-stopped # 크래시/재부팅 시 자동 복귀(부팅 복구 로직과 함께 동작)
-    env_file: .env # BOT_TOKEN, CHANNEL_ID 주입
+    restart: unless-stopped
+    pull_policy: always # up 할 때마다 최신 이미지 확인
+    env_file: .env
     environment:
       TZ: Asia/Seoul
     volumes:
-      - ./data:/app/data # 주문 기록 영속(컨테이너 교체해도 보존)
-      - ./logs:/app/logs # 로그 파일(에러 추적)
+      - ./data:/app/data # 주문 기록·세션 영속
+      - ./logs:/app/logs # 로그

@@ -23,33 +23,28 @@
 
 > **포트 개방 불필요** — 이 봇은 Discord로 나가는(outbound 443) 연결만 한다. 인바운드 listen이 없어 80/443 등을 열 필요가 없다(`docker-compose.yml`에 `ports:` 없음). 서버가 인터넷만 되면 동작.
 
-### A) Docker 빌드 (소스에서)
+### A) 배포 — `docker-compose.yml` + `.env` (서버에서 clone 없이)
 
-`node:22-alpine` 베이스라 macOS(arm64)·Ubuntu(amd64) 동일하게 빌드/실행된다.
+`docker-compose.yml`은 레지스트리 이미지(`portainer.startupcode.kr/discord-cafe-noti:latest`)를 pull한다. **이 파일과 `.env`만** 서버에 두면 끝 — `.env`만 바꿔 그대로 재사용:
 ```bash
-docker compose up -d --build     # 빌드 + 백그라운드 실행
+cp .env.example .env             # BOT_TOKEN·CHANNEL_IDS 채우기
+docker compose up -d             # 이미지 pull + 실행
 docker compose logs -f
-docker compose down
+docker compose down              # 중지
 ```
+> 레지스트리 인증이 필요하면 먼저 `docker login portainer.startupcode.kr`. Portainer 스택으로 올려도 동일.
 
-### B) 프라이빗 레지스트리로 빌드·배포
+### B) 로컬 빌드(개발) · 이미지 push
 
-로컬에서 멀티아치 이미지를 빌드해 본인 레지스트리에 push (`portainer.startupcode.kr`만 교체):
+소스에서 빌드해 로컬 실행:
+```bash
+docker compose -f docker-compose.build.yml up -d --build
+```
+멀티아치 이미지 빌드 + 레지스트리 push:
 ```bash
 docker buildx build --platform linux/amd64,linux/arm64 \
   -t portainer.startupcode.kr/discord-cafe-noti:latest --push .
 ```
-
-배포 서버에서 받아 실행:
-```bash
-cp .env.example .env             # BOT_TOKEN 채우기
-docker run -d --name discord-cafe-noti --restart unless-stopped \
-  --env-file .env -e TZ=Asia/Seoul \
-  -v "$(pwd)/data:/app/data" -v "$(pwd)/logs:/app/logs" \
-  portainer.startupcode.kr/discord-cafe-noti:latest
-docker logs -f discord-cafe-noti
-```
-> 레지스트리 인증이 필요하면 먼저 `docker login portainer.startupcode.kr`.
 
 ### C) Node 직접 / pm2 (Docker 안 쓸 때)
 ```bash
