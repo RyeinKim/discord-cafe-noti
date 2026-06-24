@@ -182,13 +182,13 @@ async function postThreadLog(threadId, name, menu, changed) {
 }
 
 /** 채널의 주문 세션 열기(멱등). @return {{opened:boolean, reason?:'already', session:object}} */
-async function openSession(channelId) {
+async function openSession(channelId, { manual = false } = {}) {
   const active = getActiveSession(channelId);
   if (active) {
     log.info('세션 이미 열림 — 열기 생략', { channelId, sessionId: active.id });
     return { opened: false, reason: 'already', session: active };
   }
-  const session = createSession(channelId); // 채널 메뉴 스냅샷 포함
+  const session = createSession(channelId, { manual }); // 채널 메뉴 스냅샷 포함
   const ch = await getChannel(channelId);
   const msg = await ch.send(buildBoard({ session }));
   setBoardMessage(session.id, msg.id);
@@ -248,9 +248,21 @@ async function closeSession(channelId) {
   return { closed: true };
 }
 
-// 자동 트리거 핸들러(스케줄러가 channelId로 호출)
-const onOpen = (channelId) => openSession(channelId).catch((e) => log.error('자동 세션 열기 오류', e));
-const onClose = (channelId) => closeSession(channelId).catch((e) => log.error('자동 세션 마감 오류', e));
+// 자동 트리거 핸들러(스케줄러가 호출)
+const onOpen = (channelId) => openSession(channelId, { manual: false }).catch((e) => log.error('자동 세션 열기 오류', e));
+const onCloseCheck = () => closeDueSessions().catch((e) => log.error('마감 체크 오류', e));
+
+/** 활성 세션 중 마감 예정(closeAt) 시각이 지난 것을 마감. 스케줄러가 매 분 호출. */
+async function closeDueSessions() {
+  const now = Date.now();
+  for (const channelId of getChannelIds()) {
+    const s = getActiveSession(channelId);
+    if (s && s.closeAt && Date.parse(s.closeAt) <= now) {
+      log.info('마감 시각 도달 → 마감', { channelId, sessionId: s.id });
+      await closeSession(channelId);
+    }
+  }
+}
 
 async function registerCommands(c) {
   try {
@@ -265,27 +277,29 @@ async function registerCommands(c) {
 
 /** 부팅 복구: 트리거가 있는 채널마다 놓친 게시/마감을 채널별 시각으로 보정. */
 async function recoverIfNeeded() {
-  const now = kstMinutes();
-  const today = todayKST();
+  const nowMs = Date.now();
+  const nowMin = kstMinutes();
   for (const channelId of getChannelIds()) {
-    const tr = getTrigger(channelId);
-    if (!tr) continue; // 트리거 없는 채널은 수동 전용 — 자동 보정 안 함
     try {
-      const [oh, om] = String(tr.openHM).split(':').map(Number);
-      const [ch, cm] = String(tr.closeHM).split(':').map(Number);
-      const openMin = oh * 60 + om;
-      const closeMin = ch * 60 + cm;
-      const isWeekday = (tr.weekdays && tr.weekdays.length ? tr.weekdays : [1, 2, 3, 4, 5]).includes(kstWeekday());
-
       let active = getActiveSession(channelId);
-      if (active && (active.date !== today || now >= closeMin)) {
-        log.info('부팅 복구: 활성 세션 마감', { channelId, sessionId: active.id });
+      // 1) 마감 예정(closeAt) 지난 활성 세션 마감 — 수동/트리거 공통
+      if (active && active.closeAt && Date.parse(active.closeAt) <= nowMs) {
+        log.info('부팅 복구: 마감 예정 지난 세션 마감', { channelId, sessionId: active.id });
         await closeSession(channelId);
         active = getActiveSession(channelId);
       }
-      if (!active && isWeekday && now >= openMin && now < closeMin) {
-        log.info('부팅 복구: 세션 열기', { channelId });
-        await openSession(channelId);
+      // 2) 트리거 채널이고 게시 시간대인데 활성 세션이 없으면 게시
+      const tr = getTrigger(channelId);
+      if (!active && tr) {
+        const [oh, om] = String(tr.openHM).split(':').map(Number);
+        const [ch, cm] = String(tr.closeHM).split(':').map(Number);
+        const openMin = oh * 60 + om;
+        const closeMin = ch * 60 + cm;
+        const isWeekday = (tr.weekdays && tr.weekdays.length ? tr.weekdays : [1, 2, 3, 4, 5]).includes(kstWeekday());
+        if (isWeekday && nowMin >= openMin && nowMin < closeMin) {
+          log.info('부팅 복구: 트리거 게시 시간대 → 게시', { channelId });
+          await openSession(channelId, { manual: false });
+        }
       }
     } catch (e) {
       log.error('부팅 복구 오류', e);
@@ -348,7 +362,7 @@ async function handleCafeCommand(interaction) {
 
   // ---- 세션 명령 ----
   if (group === null && sub === 'open') {
-    const r = await openSession(channelId);
+    const r = await openSession(channelId, { manual: true });
     return interaction.editReply(r.opened ? '✅ 주문 세션을 열었어요. (자동 열기는 생략됩니다)' : 'ℹ️ 이미 열린 세션이 있어요.');
   }
   if (group === null && sub === 'close') {
@@ -375,12 +389,12 @@ async function handleCafeCommand(interaction) {
       return interaction.editReply('⛔ 시간 형식은 HH:MM 이어야 해요 (예: 11:15).');
     }
     setTrigger(channelId, { openHM: open, closeHM: close, weekdays: days });
-    rebuildScheduler({ onOpen, onClose });
+    rebuildScheduler({ onOpen, onCloseCheck });
     return interaction.editReply(`✅ 트리거 설정 — [${daysLabel(days)}] ${open} 게시 / ${close} 마감`);
   }
   if (group === 'trigger' && sub === 'off') {
     clearTrigger(channelId);
-    rebuildScheduler({ onOpen, onClose });
+    rebuildScheduler({ onOpen, onCloseCheck });
     return interaction.editReply('✅ 이 채널의 자동 트리거를 제거했어요. (수동 open/close만)');
   }
   if (group === 'trigger' && sub === 'show') {
@@ -393,12 +407,12 @@ async function handleCafeCommand(interaction) {
   // ---- 채널 명령 ----
   if (group === 'channel' && sub === 'add') {
     addChannel(channelId);
-    rebuildScheduler({ onOpen, onClose });
+    rebuildScheduler({ onOpen, onCloseCheck });
     return interaction.editReply('✅ 이 채널을 봇 운영 채널로 등록했어요. 트리거는 `/cafe trigger set`으로 켜세요.');
   }
   if (group === 'channel' && sub === 'remove') {
     const existed = removeChannel(channelId);
-    rebuildScheduler({ onOpen, onClose });
+    rebuildScheduler({ onOpen, onCloseCheck });
     return interaction.editReply(existed ? '✅ 이 채널을 운영 채널에서 해제했어요.' : 'ℹ️ 등록돼 있지 않은 채널이에요.');
   }
   if (group === 'channel' && sub === 'list') {

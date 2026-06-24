@@ -30,6 +30,10 @@ export const config = {
   // /cafe 명령 사용 가능: 서버 관리자(항상) + 이 역할 보유자. 비우면('') 관리자만.
   adminRoleName: '스타트업코드',
 
+  // 세션 기본 유지 시간(시간). 수동(/cafe open) 또는 트리거 없는 세션에 적용.
+  // 트리거로 열린 세션은 트리거의 closeHM(마감 시각)을 우선 따른다.
+  sessionHours: 2,
+
   // 변경 정책: false = 마감 전 변경 가능(기본), true = 첫 선택 후 고정
   lockOnFirstChoice: false,
 

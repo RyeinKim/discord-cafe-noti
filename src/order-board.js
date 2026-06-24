@@ -5,16 +5,25 @@ import { config } from './config.js';
  * 주문 버튼판. 세션에 스냅샷된 menu를 사용하고, customId에 세션 id를 박아 격리한다.
  * @param {{session:object, disabled?:boolean}} opts
  */
+function fmtHM(iso) {
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: config.timezone,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(new Date(iso));
+}
+
 export function buildBoard({ session, disabled = false }) {
   const menu = session.menu;
 
   let description;
   if (disabled) {
     description = '🔒 주문이 마감되었습니다.';
-  } else if (session.closeHM) {
-    description = `${config.description}\n⏰ **마감 ${session.closeHM}**`;
+  } else if (session.closeAt) {
+    description = `${config.description}\n⏰ **마감 ${fmtHM(session.closeAt)}**`;
   } else {
-    description = `${config.description}\n⏰ 마감: 수동 종료 시`;
+    description = config.description;
   }
 
   const embed = new EmbedBuilder().setTitle(config.title).setDescription(description).setColor(0xc8956d);

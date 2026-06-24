@@ -71,20 +71,35 @@ export function getActiveSession(channelId) {
 }
 
 /** 채널에 새 세션 생성 + 활성 등록. 채널 메뉴를 세션에 스냅샷한다. */
-export function createSession(channelId) {
+/** "2026-06-24","11:20" → 그 날 KST 시각의 ISO 문자열. */
+function atKST(dateStr, hm) {
+  return new Date(`${dateStr}T${hm}:00+09:00`).toISOString();
+}
+
+/**
+ * 채널에 새 세션 생성 + 활성 등록. 마감 예정 시각(closeAt) 스냅샷:
+ *  - 트리거로 열림(manual=false, 트리거 있음): 트리거 closeHM(오늘) 우선
+ *  - 수동(/cafe open) 또는 트리거 없음: openedAt + config.sessionHours
+ */
+export function createSession(channelId, { manual = false } = {}) {
+  const now = new Date();
   const date = todayKST();
   const id = `${channelId}-${date}_${kstClock()}`;
   const tr = getTrigger(channelId);
+  const closeAt =
+    !manual && tr
+      ? atKST(date, tr.closeHM)
+      : new Date(now.getTime() + config.sessionHours * 3600 * 1000).toISOString();
   const session = {
     id,
     channelId,
     date,
-    openedAt: new Date().toISOString(),
+    openedAt: now.toISOString(),
     closedAt: null,
     finalized: false,
     boardMessageId: null,
     threadId: null,
-    closeHM: tr ? tr.closeHM : null, // 마감 시각 스냅샷(트리거 없는 수동이면 null)
+    closeAt, // 마감 예정 시각(ISO)
     menu: getMenu(channelId).map((m) => ({ emoji: m.emoji, label: m.label })), // 스냅샷
     orders: {},
     log: [],
