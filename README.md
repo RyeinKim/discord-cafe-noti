@@ -34,10 +34,10 @@ docker compose down
 
 ### B) 프라이빗 레지스트리로 빌드·배포
 
-로컬에서 멀티아치 이미지를 빌드해 본인 레지스트리에 push (`<레지스트리>`만 교체):
+로컬에서 멀티아치 이미지를 빌드해 본인 레지스트리에 push (`portainer.startupcode.kr`만 교체):
 ```bash
 docker buildx build --platform linux/amd64,linux/arm64 \
-  -t <레지스트리>/discord-cafe-noti:latest --push .
+  -t portainer.startupcode.kr/discord-cafe-noti:latest --push .
 ```
 
 배포 서버에서 받아 실행:
@@ -46,10 +46,10 @@ cp .env.example .env             # BOT_TOKEN 채우기
 docker run -d --name discord-cafe-noti --restart unless-stopped \
   --env-file .env -e TZ=Asia/Seoul \
   -v "$(pwd)/data:/app/data" -v "$(pwd)/logs:/app/logs" \
-  <레지스트리>/discord-cafe-noti:latest
+  portainer.startupcode.kr/discord-cafe-noti:latest
 docker logs -f discord-cafe-noti
 ```
-> 레지스트리 인증이 필요하면 먼저 `docker login <레지스트리>`.
+> 레지스트리 인증이 필요하면 먼저 `docker login portainer.startupcode.kr`.
 
 ### C) Node 직접 / pm2 (Docker 안 쓸 때)
 ```bash
