@@ -1,65 +1,81 @@
 # discord-cafe-noti
 
-평일 오전 11:15에 Discord 채널에 커피 주문판(버튼)을 게시하고, **11:30에 자동 마감 + 주문 종합**을 올리는 봇.
+여러 Discord 채널에서 **채널별로** 커피 주문 세션을 운영하는 봇. 버튼으로 개인별 주문을 받고, 자동/수동으로 마감하면 종합을 게시한다.
 
-- 버튼 클릭으로 개인별 주문 → `data/orders-YYYY-MM-DD.json`에 기록(append-only 감사 로그 포함)
-- **11:30 마감 후에는 변경 불가**(종합 고정). 마감 전까지는 변경 가능(`config.lockOnFirstChoice`로 첫 선택 고정으로 바꿀 수 있음)
-- 재시작으로 게시/마감을 놓치면 부팅 시 자동 보정
-- Node.js + discord.js v14 + node-cron v4
+- 버튼 클릭 → 개인별 주문(서버 별명 표시), 마감 전 변경 가능 / **마감 후 고정**
+- **채널별 세션**(동시에 1개) · **채널별 자동 트리거**(있을 수도/없을 수도) · **채널별 메뉴**
+- 주문판에 **실시간 스레드 로그**(누가 뭘/변경)
+- 트리거·채널·메뉴를 **디스코드 슬래시 명령으로 관리**(재배포 불필요)
+- Node.js + discord.js v14 + node-cron v4 · 세션/설정은 `data/`에 영구 저장 · 구조화 로그 `logs/`
 
 ## 1. Discord 봇 준비
 
-1. https://discord.com/developers/applications → **New Application** → 이름 입력
-2. **Bot** 탭 → **Reset Token** → 토큰 복사
-3. **OAuth2 → URL Generator** → 스코프 `bot` + 권한 `Send Messages`/`Embed Links`/`Read Message History` → 생성된 URL로 서버에 봇 초대
+1. https://discord.com/developers/applications → **New Application**
+2. **Bot** → **Reset Token** → 토큰 복사
+3. **OAuth2 → URL Generator** → scopes `bot` + **`applications.commands`**
+   권한: `Send Messages` / `Embed Links` / `Read Message History` / `Create Public Threads` / `Send Messages in Threads` → 생성된 URL로 서버에 초대
 4. `.env` 작성:
    ```bash
-   cp .env.example .env
-   # .env 열어서 BOT_TOKEN 채우기 (CHANNEL_ID 기본값 있음)
+   cp .env.example .env       # .env 열어 BOT_TOKEN 채우기 (CHANNEL_ID/CHANNEL_IDS로 운영 채널 시드)
    ```
 
 ## 2. 실행 방법
 
-### A) Docker (권장 — 서버 이전 용이)
+> **포트 개방 불필요** — 이 봇은 Discord로 나가는(outbound 443) 연결만 한다. 인바운드 listen이 없어 80/443 등을 열 필요가 없다(`docker-compose.yml`에 `ports:` 없음). 서버가 인터넷만 되면 동작.
 
-`node:22-alpine` 베이스라 **macOS(arm64) · Ubuntu(amd64) 동일하게** 빌드/실행됩니다.
+### A) Docker 빌드 (소스에서)
 
+`node:22-alpine` 베이스라 macOS(arm64)·Ubuntu(amd64) 동일하게 빌드/실행된다.
 ```bash
-docker compose up -d --build      # 빌드 + 백그라운드 실행
-docker compose logs -f            # 로그 확인
-docker compose down               # 중지
+docker compose up -d --build     # 빌드 + 백그라운드 실행
+docker compose logs -f
+docker compose down
 ```
 
-- 주문 기록은 호스트의 `./data`에 영속(컨테이너 교체해도 보존).
-- 재부팅/크래시 시 `restart: unless-stopped`로 자동 복귀.
+### B) 미리 빌드된 이미지로 실행 (GHCR — 빌드 불필요)
 
-다른 아키텍처용 이미지를 한 번에 만들어 레지스트리에 푸시하려면(선택):
+`main`에 push되면 GitHub Actions가 **멀티아치(amd64/arm64) 이미지를 자동 빌드**해 `ghcr.io/ryeinkim/discord-cafe-noti:latest`에 게시한다. 받아서 실행:
 ```bash
-docker buildx build --platform linux/amd64,linux/arm64 \
-  -t <registry>/discord-cafe-noti:latest --push .
+cp .env.example .env             # BOT_TOKEN 채우기
+docker run -d --name discord-cafe-noti --restart unless-stopped \
+  --env-file .env -e TZ=Asia/Seoul \
+  -v "$(pwd)/data:/app/data" -v "$(pwd)/logs:/app/logs" \
+  ghcr.io/ryeinkim/discord-cafe-noti:latest
+docker logs -f discord-cafe-noti
 ```
+> 패키지가 비공개면 먼저 `echo <GitHub PAT> | docker login ghcr.io -u <user> --password-stdin`.
+> GitHub 패키지 설정에서 **public**으로 바꾸면 인증 없이 `docker pull` 가능.
 
-### B) Node 직접 / pm2 (Docker 안 쓸 때)
-
+### C) Node 직접 / pm2 (Docker 안 쓸 때)
 ```bash
 npm install
-node src/index.js                 # 테스트 실행
-
-# 상주(라즈베리파이/PC)
-npm i -g pm2
-pm2 start ecosystem.config.cjs
-pm2 save && pm2 startup            # 부팅 시 자동 시작
+node src/index.js                # 테스트 실행
+npm i -g pm2 && pm2 start ecosystem.config.cjs && pm2 save   # 상주
 ```
 
-## 3. 설정 (`src/config.js`)
+## 3. 슬래시 명령 (`/cafe`)
 
-| 항목 | 설명 |
+> 서버 관리자 또는 `config.adminRoleName` 역할 보유자만 사용. `/cafe help`로 도움말.
+
+| 명령 | 설명 |
 |---|---|
-| `menu` | 메뉴 1~25개 (`emoji`, `label`) |
-| `open` / `close` | 게시/마감 시각(KST). cron·부팅복구가 공유 |
-| `weekdays` | 게시 요일 (기본 월~금) |
-| `lockOnFirstChoice` | `true`면 첫 선택 후 변경 불가 |
+| `/cafe open` / `close` / `status` | 이 채널 세션 수동 열기 / 마감+종합 / 상태 |
+| `/cafe trigger set open:11:15 close:11:30 days:평일` | 이 채널 자동 트리거 설정/수정(채널당 1개) |
+| `/cafe trigger off` / `show` | 트리거 제거(수동만) / 확인 |
+| `/cafe channel add` / `remove` / `list` | 운영 채널 등록 / 해제 / 목록 |
+| `/cafe menu set items:아메리카노, 라떼, 아이스티` | 이 채널 메뉴 설정(이모지 1️⃣2️⃣3️⃣ 자동) |
+| `/cafe menu show` / `reset` | 메뉴 확인 / 기본으로 |
 
-## 4. 동작 확인
+- `days`: `평일`·`매일`·`주말` 또는 `0`(일)~`6`(토) 콤마. `trigger set`은 일부만 입력 시 나머지 기존값 유지.
+- 메뉴는 **세션 열 때 스냅샷**되어 진행 중 변경에도 안전. 기본 상태는 **트리거 없음(수동)** + config 기본 메뉴.
 
-게시/마감을 즉시 보려면 `src/config.js`의 `open`/`close`를 현재 시각 +1~2분으로 잠깐 바꿔 실행해 보세요. 봇 실행 중 버튼을 눌러 주문 → 마감 시각에 종합이 올라오는지 확인.
+## 4. 설정과 데이터
+
+- **`src/config.js`**: 전역 기본값/시드 — 메뉴, 타임존, 권한 역할(`adminRoleName`), 마감 정책(`lockOnFirstChoice`), 운영 채널 시드(`channels`).
+- **`data/channels.json`**: 채널별 트리거·메뉴(디스코드 명령으로 CRUD, 런타임 변경).
+- **`data/sessions/*.json`**: 세션별 영구 기록(주문·감사 로그). **`data/state.json`**: 채널별 활성 세션 포인터.
+- **`logs/bot-YYYY-MM-DD.log`**: 구조화 로그(에러는 스택 포함). `data/`·`logs/`는 볼륨으로 영속.
+
+## 5. 동작 확인
+
+`/cafe open` → 버튼으로 주문 → `/cafe status` → `/cafe close`로 종합 확인. 자동 트리거는 `/cafe trigger set`으로 켠다.
