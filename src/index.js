@@ -33,6 +33,7 @@ import {
   setMenu,
   getMenu,
 } from './channels.js';
+import { loadAccess, addRole, removeRole, getRoles, addUser, removeUser, getUsers } from './access.js';
 import { rebuildScheduler } from './scheduler.js';
 import { log } from './logger.js';
 
@@ -93,6 +94,46 @@ const CAFE_COMMAND = {
         { type: T.Subcommand, name: 'reset', description: '기본 메뉴로 되돌리기' },
       ],
     },
+    {
+      type: T.SubcommandGroup,
+      name: 'role',
+      description: '명령 사용 허용 역할 관리 (서버 관리자만)',
+      options: [
+        {
+          type: T.Subcommand,
+          name: 'add',
+          description: '허용 역할 추가',
+          options: [{ type: T.Role, name: 'role', description: '허용할 역할', required: true }],
+        },
+        {
+          type: T.Subcommand,
+          name: 'remove',
+          description: '허용 역할 제거',
+          options: [{ type: T.Role, name: 'role', description: '제거할 역할', required: true }],
+        },
+        { type: T.Subcommand, name: 'list', description: '허용 역할 목록' },
+      ],
+    },
+    {
+      type: T.SubcommandGroup,
+      name: 'user',
+      description: '명령 사용 허용 유저 관리 (서버 관리자만)',
+      options: [
+        {
+          type: T.Subcommand,
+          name: 'add',
+          description: '허용 유저 추가',
+          options: [{ type: T.User, name: 'user', description: '허용할 유저', required: true }],
+        },
+        {
+          type: T.Subcommand,
+          name: 'remove',
+          description: '허용 유저 제거',
+          options: [{ type: T.User, name: 'user', description: '제거할 유저', required: true }],
+        },
+        { type: T.Subcommand, name: 'list', description: '허용 유저 목록' },
+      ],
+    },
   ],
 };
 
@@ -107,7 +148,9 @@ function resolveDisplayName(interaction) {
 
 async function isAllowed(interaction) {
   if (interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) return true;
-  if (!config.adminRoleName) return false;
+  const { roles, users } = loadAccess();
+  if (users.includes(interaction.user.id)) return true;
+  if (!roles.length) return false;
   let member = interaction.member;
   if (!member?.roles?.cache) {
     try {
@@ -116,7 +159,7 @@ async function isAllowed(interaction) {
       return false;
     }
   }
-  return member.roles?.cache?.some((r) => r.name === config.adminRoleName) ?? false;
+  return member.roles?.cache?.some((r) => roles.includes(r.name)) ?? false;
 }
 
 async function getChannel(channelId) {
@@ -395,6 +438,37 @@ async function handleCafeCommand(interaction) {
   if (group === 'menu' && sub === 'reset') {
     setMenu(channelId, null);
     return interaction.editReply('✅ 이 채널 메뉴를 기본값으로 되돌렸어요.');
+  }
+
+  // ---- 권한 화이트리스트(역할/유저) — 서버 관리자만 ----
+  if (group === 'role' || group === 'user') {
+    if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
+      return interaction.editReply('🔒 역할/유저 화이트리스트는 **서버 관리자**만 관리할 수 있어요.');
+    }
+    if (group === 'role' && sub === 'add') {
+      const role = interaction.options.getRole('role');
+      return interaction.editReply(addRole(role.name) ? `✅ 허용 역할 추가: ${role}` : `ℹ️ 이미 허용된 역할이에요: ${role}`);
+    }
+    if (group === 'role' && sub === 'remove') {
+      const role = interaction.options.getRole('role');
+      return interaction.editReply(removeRole(role.name) ? `✅ 허용 역할 제거: ${role}` : `ℹ️ 목록에 없던 역할이에요: ${role}`);
+    }
+    if (group === 'role' && sub === 'list') {
+      const roles = getRoles();
+      return interaction.editReply(roles.length ? '🛡️ 허용 역할: ' + roles.map((r) => `\`${r}\``).join(', ') : '🛡️ 허용 역할 없음 (관리자만 사용 가능).');
+    }
+    if (group === 'user' && sub === 'add') {
+      const user = interaction.options.getUser('user');
+      return interaction.editReply(addUser(user.id) ? `✅ 허용 유저 추가: <@${user.id}>` : `ℹ️ 이미 허용된 유저예요: <@${user.id}>`);
+    }
+    if (group === 'user' && sub === 'remove') {
+      const user = interaction.options.getUser('user');
+      return interaction.editReply(removeUser(user.id) ? `✅ 허용 유저 제거: <@${user.id}>` : `ℹ️ 목록에 없던 유저예요: <@${user.id}>`);
+    }
+    if (group === 'user' && sub === 'list') {
+      const users = getUsers();
+      return interaction.editReply(users.length ? '👤 허용 유저: ' + users.map((u) => `<@${u}>`).join(', ') : '👤 허용 유저 없음.');
+    }
   }
 }
 

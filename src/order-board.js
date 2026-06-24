@@ -96,6 +96,12 @@ export function buildHelp({ managed, trigger }) {
           '`/cafe menu show` — 현재 메뉴\n`/cafe menu reset` — 기본으로',
       },
       {
+        name: '🛡️ 권한 화이트리스트 (서버 관리자만)',
+        value:
+          '`/cafe role add|remove|list @역할` — 명령 사용 허용 역할\n' +
+          '`/cafe user add|remove|list @유저` — 명령 사용 허용 유저',
+      },
+      {
         name: '⚙️ `trigger set` 옵션',
         value:
           '• `open` — 게시 시각 `HH:MM` (예: `11:15`)\n' +
