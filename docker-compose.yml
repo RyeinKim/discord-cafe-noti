@@ -1,0 +1,12 @@
+services:
+  bot:
+    build: .
+    image: discord-cafe-noti:latest
+    container_name: discord-cafe-noti
+    restart: unless-stopped # 크래시/재부팅 시 자동 복귀(부팅 복구 로직과 함께 동작)
+    env_file: .env # BOT_TOKEN, CHANNEL_ID 주입
+    environment:
+      TZ: Asia/Seoul
+    volumes:
+      - ./data:/app/data # 주문 기록 영속(컨테이너 교체해도 보존)
+      - ./logs:/app/logs # 로그 파일(에러 추적)
