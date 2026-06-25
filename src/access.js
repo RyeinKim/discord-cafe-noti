@@ -1,4 +1,3 @@
-import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { config } from './config.js';
 import { readJSON, writeJSON } from './util.js';
@@ -69,9 +68,10 @@ export function removeUser(id) {
  * - 변환 못 한 이름(역할 삭제/이름변경)은 드롭.
  */
 export function syncAccess(client) {
-  const existed = existsSync(ACCESS_FILE);
   const a = loadAccess();
+  const seeded = a.seededAt != null; // 파일 존재가 아니라 시드 플래그로 판단(쓰기 실패 시 부활 방지)
   const dropped = [];
+  const guildIds = new Set(client.guilds.cache.keys()); // @everyone(=길드ID) 식별용
 
   const resolve = (nameOrId) => {
     if (isSnowflake(nameOrId)) return nameOrId; // 이미 ID
@@ -83,13 +83,22 @@ export function syncAccess(client) {
     return null;
   };
 
-  const roles = a.roles.map(resolve).filter(Boolean);
-  if (!existed && config.adminRoleName) {
+  // @everyone(=길드ID, 전체 개방)은 저장 계층에서 항상 제외
+  const roles = a.roles
+    .map(resolve)
+    .filter(Boolean)
+    .filter((id) => !guildIds.has(id));
+  if (!seeded && config.adminRoleName) {
     const id = resolve(config.adminRoleName);
-    if (id) roles.push(id);
+    if (id && !guildIds.has(id)) roles.push(id);
   }
   a.roles = [...new Set(roles)];
-  save(a);
+  a.seededAt = a.seededAt || new Date().toISOString();
+  try {
+    save(a);
+  } catch (e) {
+    log.error('access.json 저장 실패 — 화이트리스트 변경이 유실될 수 있어요', e);
+  }
   if (dropped.length) log.warn('역할 화이트리스트 이름→ID 변환 실패(드롭됨)', { dropped });
   return a;
 }

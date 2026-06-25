@@ -87,10 +87,10 @@ export function createSession(channelId, { manual = false } = {}) {
   const date = todayKST();
   const id = `${channelId}-${date}_${kstClock()}`;
   const tr = getTrigger(channelId);
-  const closeAt =
-    !manual && tr
-      ? atKST(date, tr.closeHM)
-      : new Date(now.getTime() + config.sessionHours * 3600 * 1000).toISOString();
+  const fallbackCloseAt = new Date(now.getTime() + config.sessionHours * 3600 * 1000).toISOString();
+  let closeAt = !manual && tr ? atKST(date, tr.closeHM) : fallbackCloseAt;
+  // 트리거 closeHM이 이미 지난(게시 지연·시각 역전) 경우 방어: 최소 sessionHours 보장
+  if (!manual && tr && Date.parse(closeAt) <= now.getTime()) closeAt = fallbackCloseAt;
   const session = {
     id,
     channelId,
@@ -156,11 +156,19 @@ export function finalizeActive(channelId) {
   const id = st.activeByChannel?.[channelId];
   if (!id) return null;
   const s = loadSession(id);
+  let didFinalize = false;
   if (s && !s.finalized) {
     s.finalized = true;
     s.closedAt = new Date().toISOString();
     writeJSON(sessionFile(id), s);
+    didFinalize = true;
   }
   setActive(channelId, null);
-  return s;
+  // _didFinalize: 이번 호출이 실제로 마감을 수행했는지(종합 중복 게시 방지용)
+  return s ? { ...s, _didFinalize: didFinalize } : null;
+}
+
+/** state.activeByChannel에 활성 세션이 있는 채널 ID들(등록 해제된 채널 포함). */
+export function activeChannelIds() {
+  return Object.keys(loadState().activeByChannel || {});
 }

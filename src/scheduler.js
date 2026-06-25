@@ -14,6 +14,7 @@ export function rebuildScheduler({ onOpen, onCloseCheck }) {
   for (const t of tasks) {
     try {
       t.stop();
+      if (typeof t.destroy === 'function') t.destroy(); // stop만으론 전역 레지스트리에서 안 빠짐 → 누수 방지
     } catch (_) {
       /* 이미 멈춤 */
     }

@@ -14,6 +14,7 @@ import {
   createSession,
   getActiveSession,
   finalizeActive,
+  activeChannelIds,
   setBoardMessage,
   setThread,
   loadSession,
@@ -44,6 +45,7 @@ const KEYCAPS = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣
 const CAFE_COMMAND = {
   name: 'cafe',
   description: '커피 주문 세션 관리',
+  dm_permission: false, // DM 노출/실행 차단(길드 전용)
   ...(config.adminRoleName ? {} : { default_member_permissions: PermissionFlagsBits.ManageGuild.toString() }),
   options: [
     { type: T.Subcommand, name: 'help', description: '명령어 도움말 보기' },
@@ -147,10 +149,13 @@ function resolveDisplayName(interaction) {
 }
 
 async function isAllowed(interaction) {
+  if (!interaction.inGuild()) return false; // 길드 외(DM)는 거부 — fail-closed
   if (interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) return true;
   const { roles, users } = loadAccess();
   if (users.includes(interaction.user.id)) return true;
-  if (!roles.length) return false;
+  // @everyone(=길드ID)은 화이트리스트로 인정하지 않음(전체 개방 방지)
+  const allowRoles = roles.filter((id) => id !== interaction.guildId);
+  if (!allowRoles.length) return false;
   let member = interaction.member;
   if (!member?.roles?.cache) {
     try {
@@ -159,7 +164,7 @@ async function isAllowed(interaction) {
       return false;
     }
   }
-  return roles.some((id) => member.roles?.cache?.has(id) ?? false);
+  return allowRoles.some((id) => member.roles?.cache?.has(id) ?? false);
 }
 
 async function getChannel(channelId) {
@@ -221,6 +226,11 @@ async function closeSession(channelId) {
     log.warn('활성 세션 파일을 찾을 수 없어 마감 생략(포인터만 해제)', { channelId });
     return { closed: false, reason: 'no-session' };
   }
+  if (!s._didFinalize) {
+    // 다른 경로(매분 체커·수동 close·부팅복구)가 이미 마감 → 종합 중복 게시 방지(멱등)
+    log.info('이미 마감된 세션 — 종합 재게시 생략', { channelId, sessionId: s.id });
+    return { closed: false, reason: 'already' };
+  }
   const ch = await getChannel(channelId);
 
   if (s.boardMessageId) {
@@ -255,7 +265,9 @@ const onCloseCheck = () => closeDueSessions().catch((e) => log.error('마감 체
 /** 활성 세션 중 마감 예정(closeAt) 시각이 지난 것을 마감. 스케줄러가 매 분 호출. */
 async function closeDueSessions() {
   const now = Date.now();
-  for (const channelId of getChannelIds()) {
+  // 등록 해제된 채널에 남은 활성 세션도 마감하도록 state의 활성 채널까지 포함
+  const ids = new Set([...getChannelIds(), ...activeChannelIds()]);
+  for (const channelId of ids) {
     const s = getActiveSession(channelId);
     if (s && s.closeAt && Date.parse(s.closeAt) <= now) {
       log.info('마감 시각 도달 → 마감', { channelId, sessionId: s.id });
@@ -279,7 +291,8 @@ async function registerCommands(c) {
 async function recoverIfNeeded() {
   const nowMs = Date.now();
   const nowMin = kstMinutes();
-  for (const channelId of getChannelIds()) {
+  const ids = new Set([...getChannelIds(), ...activeChannelIds()]);
+  for (const channelId of ids) {
     try {
       let active = getActiveSession(channelId);
       // 1) 마감 예정(closeAt) 지난 활성 세션 마감 — 수동/트리거 공통
@@ -329,6 +342,9 @@ function daysLabel(days) {
 
 /** /cafe 슬래시 커맨드 처리. */
 async function handleCafeCommand(interaction) {
+  if (!interaction.inGuild()) {
+    return interaction.reply({ content: '이 명령은 서버 채널에서만 사용할 수 있어요.', flags: MessageFlags.Ephemeral });
+  }
   if (!(await isAllowed(interaction))) {
     const who = config.adminRoleName ? `서버 관리자 또는 \`${config.adminRoleName}\` 역할 멤버` : '서버 관리자';
     await interaction.reply({ content: `${who}만 사용할 수 있어요.`, flags: MessageFlags.Ephemeral });
@@ -367,7 +383,10 @@ async function handleCafeCommand(interaction) {
   }
   if (group === null && sub === 'close') {
     const r = await closeSession(channelId);
-    return interaction.editReply(r.closed ? '✅ 세션을 마감하고 종합을 게시했어요.' : 'ℹ️ 마감할 세션이 없어요.');
+    if (r.closed) return interaction.editReply('✅ 세션을 마감하고 종합을 게시했어요.');
+    return interaction.editReply(
+      r.reason === 'already' ? 'ℹ️ 이미 마감됐어요. (종합은 위에 게시됨)' : 'ℹ️ 마감할 세션이 없어요.'
+    );
   }
   if (group === null && sub === 'status') {
     const a = getActiveSession(channelId);
@@ -387,6 +406,13 @@ async function handleCafeCommand(interaction) {
     const days = daysOpt ? parseDays(daysOpt) : cur?.weekdays || [1, 2, 3, 4, 5];
     if (!validHM(open) || !validHM(close)) {
       return interaction.editReply('⛔ 시간 형식은 HH:MM 이어야 해요 (예: 11:15).');
+    }
+    const toMin = (s) => {
+      const [h, m] = s.split(':').map(Number);
+      return h * 60 + m;
+    };
+    if (toMin(close) <= toMin(open)) {
+      return interaction.editReply('⛔ 마감 시각은 게시 시각보다 뒤여야 해요. (자정 넘김은 지원하지 않아요)');
     }
     setTrigger(channelId, { openHM: open, closeHM: close, weekdays: days });
     rebuildScheduler({ onOpen, onCloseCheck });
