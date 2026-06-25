@@ -514,7 +514,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const res = recordToSession(sessionId, interaction.user.id, name, idx);
 
     let text;
-    if (res.ok) {
+    if (res.ok && res.unchanged) {
+      text = `✅ 이미 **${menu.label}**(으)로 주문돼 있어요.`;
+    } else if (res.ok) {
       text =
         `✅ **${menu.label}**(으)로 주문됐어요.` +
         (config.lockOnFirstChoice ? '' : ' 마감 전까지 다시 눌러 바꿀 수 있어요.');
@@ -529,7 +531,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
     await interaction.editReply(text);
 
-    if (res.ok) {
+    if (res.ok && !res.unchanged) {
       log.info('주문', { sessionId, name, menu: menu.label, changed: !!res.changed });
       if (config.logToThread) postThreadLog(session.threadId, name, menu, res.changed).catch(() => {});
     }

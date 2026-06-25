@@ -137,6 +137,11 @@ export function recordToSession(id, userId, name, choiceIndex) {
     return { ok: false, reason: 'locked', existing };
   }
 
+  // 같은 선택을 다시 누르면 no-op(멱등) — 스레드 로그·log 배열 중복 방지
+  if (existing && existing.choice === choiceIndex) {
+    return { ok: true, changed: false, unchanged: true, session: s };
+  }
+
   const changed = !!existing && existing.choice !== choiceIndex;
   const at = new Date().toISOString();
   s.orders[userId] = { choice: choiceIndex, name, at };
