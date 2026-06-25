@@ -22,23 +22,23 @@
 - **세션 모델**: 채널별 활성 세션 0~1개.
   - `data/state.json` → `{ activeByChannel: { [channelId]: sessionId } }`
   - `data/sessions/{channelId-날짜_HH-mm-ss}.json` → 세션 기록(마감해도 보존). `orders[userId]={choice,name,at}`, append-only `log`.
-  - 세션 생성 시 **menu**와 **closeHM(마감시각)을 스냅샷** → 도중 설정 바뀌어도 그 세션은 일관.
+  - 세션 생성 시 **menu**와 **closeAt(마감 예정시각)을 스냅샷** → 도중 설정 바뀌어도 그 세션은 일관. closeAt = 트리거 세션은 트리거 `closeHM`, 수동/무트리거 세션은 `openedAt + config.sessionHours`(기본 2시간).
   - 버튼 `customId = order:<sessionId>:<idx>` → 세션 격리(지난 세션 버튼은 그 세션 finalized라 거부).
 - **채널/트리거/메뉴**: `data/channels.json` → `{ [channelId]: { label, trigger:{openHM,closeHM,weekdays}|null, menu:[{emoji,label}]|null } }`. 기본 = 트리거 없음(수동), menu null이면 config 기본.
-- **권한 화이트리스트**: `data/access.json` → `{ roles:[roleId], users:[userId] }`. **역할은 ID 매칭**(이름 변경에 안전). `syncAccess(client)`가 시작 시 기존 이름→ID 마이그레이션 + `config.adminRoleName` 최초 시드(멱등).
+- **권한 화이트리스트**: `data/access.json` → `{ roles:[roleId], users:[userId], seededAt }`. **역할은 ID 매칭**(이름 변경에 안전). `syncAccess(client)`가 시작 시 기존 이름→ID 마이그레이션 + `config.adminRoleName` 최초 시드(`seededAt` 플래그로 멱등 — 쓰기 실패 시 부활 방지). **@everyone(=길드ID)은 저장 계층에서 항상 제외**(전체 개방 방지).
 - **로그**: `logs/bot-YYYY-MM-DD.log` 구조화(`시각 LEVEL 메시지 {ctx}`), 콘솔+파일, 에러는 스택.
 
 ## 파일 구조 (src/)
 
 | 파일 | 역할 |
 |---|---|
-| `config.js` | 전역 기본값/시드 (메뉴, 타임존, `adminRoleName` 시드, 마감정책, 트리거 기본시각) |
+| `config.js` | 전역 기본값/시드 (메뉴, 타임존, `adminRoleName` 시드, 마감정책, `sessionHours`(수동 세션 유지시간, 기본 2h), 트리거 기본시각) |
 | `index.js` | 봇 진입·인터랙션·`/cafe` 명령·세션 open/close·부팅복구·isAllowed |
 | `store.js` | 채널별 세션 저장/조회 |
 | `channels.js` | 채널·트리거·메뉴 관리(channels.json) |
 | `access.js` | 권한 화이트리스트(access.json), 역할ID/유저ID, syncAccess 마이그레이션 |
 | `order-board.js` | 버튼판/마감 종합/`/cafe help` 임베드 |
-| `scheduler.js` | node-cron 채널별 동적 재구성(rebuildScheduler) |
+| `scheduler.js` | node-cron 트리거 게시 cron + 전역 매분 마감체커 동적 재구성(rebuildScheduler) |
 | `logger.js` | 구조화 로그(콘솔+파일) |
 | `util.js` | JSON IO(원자적 tmp→rename, 손상 백업) |
 
@@ -53,15 +53,16 @@
 - `role add|remove|list @역할` (서버 관리자만, ID 매칭, @everyone 거부)
 - `user add|remove|list @유저` (서버 관리자만)
 
-**권한**: 서버 관리자(ManageGuild) **OR** 허용 역할 보유 **OR** 허용 유저 → `/cafe` 사용. 단 `role`/`user` 관리(화이트리스트 변경)는 **관리자만**(권한 상승 방지). 트리거/채널/메뉴 변경 시 스케줄러 즉시 재구성.
+**권한**: 서버 관리자(ManageGuild) **OR** 허용 역할 보유 **OR** 허용 유저 → `/cafe` 사용(`isAllowed` fail-closed, DM 거부). 단 `role`/`user` 관리(화이트리스트 변경)는 **관리자만**(권한 상승 방지). 명령은 길드 전용(`dm_permission:false` + `inGuild()` 가드). 트리거/채널/메뉴 변경 시 스케줄러 즉시 재구성.
 
 ## 동작 요약
 
-- 트리거 있는 채널은 `openHM`에 자동 게시 / `closeHM`에 자동 마감(채널별). 기본은 트리거 없음(수동 `/cafe open`/`close`).
-- 버튼 클릭 → 개인 주문(서버 별명). **마감 전 변경 가능, 마감 후 고정**(`config.lockOnFirstChoice=true`면 첫 선택 고정).
-- 주문판 마감 표기 동적: 트리거 있으면 `⏰ 마감 HH:MM`, 없으면 `⏰ 마감: 수동 종료 시`.
-- 실시간 **스레드 로그**(`별명 → 메뉴`, 변경 표시). 마감 시 **종합 명단** 게시 + 스레드 보관.
-- **부팅 복구**: 재시작 시 채널별 트리거 기준으로 놓친 게시/마감 보정(멱등).
+- 게시: 트리거 있는 채널은 `openHM`에 자동 게시, 없으면 수동 `/cafe open`.
+- **마감은 세션 `closeAt`(마감 예정시각) 단일 기준** — 전역 **매분 체커**(`closeDueSessions`)가 `closeAt` 도달 시 마감. 트리거 세션은 트리거 `closeHM`, **수동 세션은 open + `sessionHours`(기본 2h)**. 트리거가 몇 시간이든 트리거 `closeHM` 우선. (`trigger set`은 `close>open` 검증, 게시 지연·역전 시 폴백)
+- 버튼 클릭 → 개인 주문(서버 별명). **마감 전 변경 가능, 마감 후 고정**(`lockOnFirstChoice=true`면 첫 선택 고정). **같은 메뉴 재클릭은 멱등**(스레드·로그 중복 없이 "이미 주문됨" 안내).
+- 주문판에 `⏰ 마감 HH:MM`(closeAt) 표시. 마감되면 `🔒` 으로 버튼 비활성화.
+- 실시간 **스레드 로그**(`별명 → 메뉴`, 변경만 표시). 마감 시 **종합 명단** 1회 게시(`_didFinalize`로 중복 방지) + 스레드 보관.
+- **부팅 복구**: 재시작 시 `closeAt` 지난 활성 세션 마감 + 트리거 게시시간대 미게시 게시(멱등). 등록 해제된 채널의 잔존 세션도 마감(`getChannelIds ∪ activeChannelIds`).
 
 ## 배포
 
@@ -77,15 +78,17 @@
 - Discord 계정: wayne@startupcode.kr.
 - 채널: **테스트 `1519006705168552058`**, **실제 `1516717960348041298`**.
 - GitHub 리모트: `origin` = RyeinKim/discord-cafe-noti, `work` = startup-life/discord-cafe-noti (둘 다 `main`에 push).
-- 배포 서버: `edu-service-2`(`~/discord-cafe-noti`, root).
+- 배포 서버: `edu-service-2`(**라이브 프로덕션**, `/root/discord-cafe-noti`, root). 봇 전용 `docker-compose.yml`이라 같은 서버의 edu 4개 앱과 분리 → 봇 재배포가 사이트에 영향 없음. (서버 접속·운영 함정은 메모리 `edu-service-2-server` 참고)
 - 봇 토큰은 `.env`에만(절대 커밋 X — `.gitignore`로 `.env`/`data`/`logs` 차단).
 
 ## 현재 상태 / 남은 일
 
-- ✅ 봇 기능 완성, 다회 적대적 검증 통과(치명 0). 멀티아치 이미지 레지스트리 게시.
-- ✅ 서버 배포 진행 중 — 초기 볼륨 권한 EACCES는 entrypoint로 해결됨. `docker compose pull && up -d`로 최신 적용 필요.
-- ⏳ **실제 채널(`1516...`) 자동 운영**: 그 채널에서 `/cafe channel add` + `/cafe trigger set open:11:15 close:11:30 days:평일` 하면 다음날부터 자동. (등록만 하면 당일은 게시 안 됨)
-- (선택, 비치명) access.js 동시 쓰기 직렬화, isSnowflake 견고화 등 — 운영 위험 낮음.
+- ✅ 봇 기능 완성, 다회 적대적 검증 통과(치명 0). edu-service-2에 **최신 이미지 배포·가동 중**(`Coffee Bot#1691`, 트리거 채널 1개, 매분 마감체커 동작).
+- ✅ **마감 로직 = closeAt 단일 기준**(수동 2h / 트리거 우선) + 매분 전역 체커로 통일.
+- ✅ **실사용 버그 수정**: 같은 선택 재클릭 시 스레드·주문 로그 중복 → 멱등 처리.
+- ✅ **종합검증 후속 수정**(치명 0): 마감 종합 중복게시 방지(`_didFinalize`), 트리거 조기마감 방지(`close>open` 검증·폴백), 권한 fail-closed·DM차단·@everyone 필터, 해제 채널 잔존세션 마감, node-cron `destroy` 누수·entrypoint chown 경고.
+- ⏳ **실제 채널(`1516...`) 자동 운영**: 그 채널에서 `/cafe channel add` + `/cafe trigger set` 하면 다음날부터 자동(트리거 채널 1개 등록 확인됨).
+- (선택, 비치명) 자정 넘김 트리거 미지원(명시 거부), access.js add/remove save try/catch 일관화 — 운영 위험 낮음.
 
 ## 개발 관행
 
